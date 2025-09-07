@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wallpaper Generator</title>
+<style>
+  body { margin:0; font-family:sans-serif; background:#111; color:#eee; }
+  .container { display:flex; flex-wrap:wrap; max-width:1600px; margin:auto; padding:20px; gap:20px; }
+  .canvas-container { flex:2; background:#000; padding:10px; border-radius:8px; }
+  canvas { display:block; width:100%; image-rendering: pixelated; }
+  .controls { flex:1; background:#222; padding:10px; border-radius:8px; display:flex; flex-direction:column; gap:10px; }
+  input[type="number"], input[type="color"], input[type="range"] { margin-left:5px; }
+  .point { position:absolute; width:16px; height:16px; border-radius:50%; border:2px solid white; cursor:pointer; transform:translate(-50%, -50%); }
+  label { font-size:0.9em; display:block; }
+  button { cursor:pointer; margin-top:5px; padding:4px 8px; }
+  #pointControls { margin-top:10px; }
+  #grid { position:relative; background:#333; width:100%; border:1px solid #555; margin-bottom:5px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+  <div class="controls">
+    <h3>Randomize Options</h3>
+    <label><input type="checkbox" id="randColor" checked> Randomize Colors</label>
+    <label><input type="checkbox" id="randPixel" checked> Randomize Pixelation</label>
+    <label><input type="checkbox" id="randGrain" checked> Randomize Grain</label>
+    <label><input type="checkbox" id="randPosition" checked> Randomize Position</label>
+    <label><input type="checkbox" id="randIntensity" checked> Randomize Intensity</label>
+    <button id="randomizeBtn">Randomize</button>
+
+    <h3>Resolution</h3>
+    W: <input type="number" id="resW" value="1920">
+    H: <input type="number" id="resH" value="1080">
+
+    <h3>Pixelation</h3>
+    <input type="range" id="pixelSize" min="1" max="24" value="1">
+    <input type="number" id="pixelSizeNum" value="1" style="width:50px;">
+
+    <h3>Grain</h3>
+    <input type="range" id="grain" min="0" max="1" step="0.01" value="0.12">
+    <input type="number" id="grainNum" value="0.12" step="0.01" style="width:50px;">
+
+    <h3>Preview Mode</h3>
+    <label><input type="checkbox" id="usePreview" checked> Enable Preview While Dragging</label>
+    <label>Preview Scale:
+      <input type="range" id="previewScale" min="0.05" max="0.5" step="0.05" value="0.2">
+      <input type="number" id="previewScaleNum" step="0.05" min="0.05" max="0.5" value="0.2" style="width:50px;">
+    </label>
+
+    <h3>Color Points</h3>
+    <div id="grid"></div>
+    <div id="pointControls"></div>
+    <button id="addPointBtn">Add Point</button>
+    <button id="downloadBtn">Download PNG</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const grid = document.getElementById('grid');
+const pointControls = document.getElementById('pointControls');
+
+let points = [{ color:'#7b2ff7', x:0.5, y:0.5, intensity:1 }];
+let dragging = null;
+
+let resolution = { w:1920, h:1080 };
+let pixelSize = 1;
+let grain = 0.12;
+let usePreview = true;
+let previewScale = 0.2;
+
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m ? { r:parseInt(m[1],16), g:parseInt(m[2],16), b:parseInt(m[3],16) } : { r:0,g:0,b:0 };}
+
+function updateGridAspect() {
+  const aspect = resolution.h / resolution.w * 100;
+  grid.style.paddingTop = aspect + "%";
+}
+updateGridAspect();
+
+function draw(preview=false){
+  const targetW = Math.max(1,resolution.w);
+  const targetH = Math.max(1,resolution.h);
+  let scale = pixelSize;
+
+  let w = targetW;
+  let h = targetH;
+
+  if(preview && usePreview){
+    w = Math.max(1,Math.floor(targetW*previewScale));
+    h = Math.max(1,Math.floor(targetH*previewScale));
+    scale = Math.max(1,Math.floor(pixelSize*previewScale));
+  }
+
+  const off = document.createElement('canvas');
+  off.width = Math.max(1,Math.floor(w/scale));
+  off.height = Math.max(1,Math.floor(h/scale));
+  const offCtx = off.getContext('2d');
+
+  const img = offCtx.createImageData(off.width, off.height);
+  const data = img.data;
+
+  for(let y=0;y<off.height;y++){
+    for(let x=0;x<off.width;x++){
+      let r=0,g=0,b=0,totalWeight=0;
+      for(const p of points){
+        const px=p.x*off.width, py=p.y*off.height;
+        const dx=x-px, dy=y-py;
+        const distSq = dx*dx+dy*dy;
+        const weight = p.intensity/(distSq+1);
+        const col=hexToRgb(p.color);
+        r+=col.r*weight; g+=col.g*weight; b+=col.b*weight; totalWeight+=weight;
+      }
+      if(points.length===1){
+        const col=hexToRgb(points[0].color);
+        r=col.r; g=col.g; b=col.b; totalWeight=1;
+      }
+      const i=(y*off.width+x)*4;
+      data[i]=r/totalWeight; data[i+1]=g/totalWeight; data[i+2]=b/totalWeight; data[i+3]=255;
+    }
+  }
+
+  if(grain>0){
+    const intensity = clamp(grain,0,1);
+    for(let i=0;i<data.length;i+=4){
+      const n=(Math.random()*2-1)*255*intensity;
+      data[i]=clamp(data[i]+n,0,255);
+      data[i+1]=clamp(data[i+1]+n,0,255);
+      data[i+2]=clamp(data[i+2]+n,0,255);
+    }
+  }
+
+  offCtx.putImageData(img,0,0);
+
+  canvas.width=targetW; canvas.height=targetH;
+  ctx.imageSmoothingEnabled=false;
+  ctx.clearRect(0,0,targetW,targetH);
+  ctx.drawImage(off,0,0,off.width,off.height,0,0,targetW,targetH);
+}
+
+function createPointElement(p,i){
+  const div = document.createElement('div');
+  div.className='point';
+  div.style.backgroundColor=p.color;
+  div.style.left=(p.x*100)+'%';
+  div.style.top=(p.y*100)+'%';
+  div.onmousedown = ()=>{ dragging=i; };
+  grid.appendChild(div);
+}
+
+function refreshPointControls() {
+  pointControls.innerHTML='';
+  points.forEach((p,i)=>{
+    const div = document.createElement('div');
+    div.style.display='flex';
+    div.style.alignItems='center';
+    div.style.gap='5px';
+    div.style.marginBottom='3px';
+
+    const colorInput = document.createElement('input');
+    colorInput.type='color';
+    colorInput.value=p.color;
+    colorInput.oninput = (e)=>{ p.color = e.target.value; refreshGrid(); draw(); };
+    div.appendChild(colorInput);
+
+    const intensityLabel = document.createElement('label');
+    intensityLabel.textContent='Intensity:';
+    div.appendChild(intensityLabel);
+
+    const intensityInput = document.createElement('input');
+    intensityInput.type='number';
+    intensityInput.step='0.1';
+    intensityInput.value=p.intensity;
+    intensityInput.style.width='50px';
+    intensityInput.oninput = (e)=>{ p.intensity = Number(e.target.value); draw(); };
+    div.appendChild(intensityInput);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = points.length<=1?'Keep 1':'Remove';
+    removeBtn.disabled = points.length<=1;
+    removeBtn.onclick = ()=>{
+      if(points.length>1){ points.splice(i,1); refreshGrid(); refreshPointControls(); draw(); }
+    };
+    div.appendChild(removeBtn);
+
+    pointControls.appendChild(div);
+  });
+}
+
+function refreshGrid(){
+  grid.innerHTML='';
+  points.forEach((p,i)=>createPointElement(p,i));
+  refreshPointControls();
+}
+
+grid.onmousemove = function(e){
+  if(dragging===null) return;
+  const rect = grid.getBoundingClientRect();
+  const x=clamp((e.clientX-rect.left)/rect.width,0,1);
+  const y=clamp((e.clientY-rect.top)/rect.height,0,1);
+  points[dragging].x=x; points[dragging].y=y;
+  refreshGrid();
+  draw(true);
+}
+grid.onmouseup = grid.onmouseleave = function(){
+  if(dragging!==null) draw(false);
+  dragging=null;
+}
+
+document.getElementById('addPointBtn').onclick = ()=>{
+  points.push({ color:'#ffffff', x:0.5, y:0.5, intensity:1 });
+  refreshGrid(); draw();
+}
+
+document.getElementById('downloadBtn').onclick = ()=>{
+  draw(false);
+  const url=canvas.toDataURL('image/png');
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`wallpaper_${canvas.width}x${canvas.height}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// Pixelation
+document.getElementById('pixelSize').oninput = e=>{
+  pixelSize = Number(e.target.value);
+  document.getElementById('pixelSizeNum').value=pixelSize;
+  draw();
+}
+document.getElementById('pixelSizeNum').oninput = e=>{
+  pixelSize = Number(e.target.value);
+  document.getElementById('pixelSize').value=pixelSize;
+  draw();
+}
+
+// Grain
+document.getElementById('grain').oninput = e=>{
+  grain = Number(e.target.value);
+  document.getElementById('grainNum').value=grain;
+  draw();
+}
+document.getElementById('grainNum').oninput = e=>{
+  grain = Number(e.target.value);
+  document.getElementById('grain').value=grain;
+  draw();
+}
+
+// Resolution
+document.getElementById('resW').oninput = e=>{ resolution.w=Number(e.target.value); updateGridAspect(); draw(); }
+document.getElementById('resH').oninput = e=>{ resolution.h=Number(e.target.value); updateGridAspect(); draw(); }
+
+// Preview controls
+document.getElementById('usePreview').oninput = e=>{
+  usePreview = e.target.checked;
+}
+document.getElementById('previewScale').oninput = e=>{
+  previewScale = Number(e.target.value);
+  document.getElementById('previewScaleNum').value=previewScale;
+}
+document.getElementById('previewScaleNum').oninput = e=>{
+  previewScale = Number(e.target.value);
+  document.getElementById('previewScale').value=previewScale;
+}
+
+// Randomize
+document.getElementById('randomizeBtn').onclick = ()=>{
+  const randColor = document.getElementById('randColor').checked;
+  const randPixel = document.getElementById('randPixel').checked;
+  const randGrain = document.getElementById('randGrain').checked;
+  const randPosition = document.getElementById('randPosition').checked;
+  const randIntensity = document.getElementById('randIntensity').checked;
+
+  if(randPixel) pixelSize = Math.floor(Math.random()*20)+1;
+  if(randGrain) grain = Math.random();
+
+  points = points.map(p=>({
+    x: randPosition ? Math.random():p.x,
+    y: randPosition ? Math.random():p.y,
+    intensity: randIntensity ? Math.random()*2:p.intensity,
+    color: randColor ? '#'+Math.floor(Math.random()*16777215).toString(16).padStart(6,'0'):p.color
+  }));
+  document.getElementById('pixelSize').value=pixelSize;
+  document.getElementById('pixelSizeNum').value=pixelSize;
+  document.getElementById('grain').value=grain;
+  document.getElementById('grainNum').value=grain;
+  refreshGrid(); draw();
+}
+
+refreshGrid();
+draw();
+</script>
+
+</body>
+</html>
