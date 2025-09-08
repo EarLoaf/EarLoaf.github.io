@@ -9,7 +9,7 @@
   .canvas-container { flex:2; background:#000; padding:10px; border-radius:8px; }
   canvas { display:block; width:100%; image-rendering: pixelated; }
   .controls { flex:1; background:#222; padding:10px; border-radius:8px; display:flex; flex-direction:column; gap:10px; }
-  input[type="number"], input[type="color"], input[type="range"] { margin-left:5px; }
+  input[type="number"], input[type="text"], input[type="range"] { margin-left:5px; }
   .point { position:absolute; width:16px; height:16px; border-radius:50%; border:2px solid white; cursor:pointer; transform:translate(-50%, -50%); }
   label { font-size:0.9em; display:block; }
   button { cursor:pointer; margin-top:5px; padding:4px 8px; }
@@ -161,12 +161,39 @@ function refreshPointControls() {
     div.style.alignItems='center';
     div.style.gap='5px';
     div.style.marginBottom='3px';
+    div.dataset.index = i; // Add data-index to the container div
 
+    // Text input for hex/RGB
     const colorInput = document.createElement('input');
-    colorInput.type='color';
-    colorInput.value=p.color;
-    colorInput.oninput = (e)=>{ p.color = e.target.value; refreshGrid(); draw(); };
+    colorInput.type = 'text';
+    colorInput.value = p.color;
+    colorInput.placeholder = 'Hex or rgb()';
+    colorInput.style.width = '80px';
     div.appendChild(colorInput);
+
+    // Apply button
+    const applyBtn = document.createElement('button');
+    applyBtn.textContent = 'Apply';
+    applyBtn.onclick = () => {
+        const value = colorInput.value.trim();
+        let newColor = '#000000'; // Default to black on invalid input
+
+        if (value.startsWith('#')) {
+            // Hex code
+            newColor = value;
+        } else if (value.startsWith('rgb')) {
+            // RGB value
+            newColor = rgbToHex(value);
+        } else {
+            // Assume it's a hex without the #
+            newColor = '#' + value;
+        }
+
+        points[i].color = newColor;
+        refreshGrid();
+        draw();
+    };
+    div.appendChild(applyBtn);
 
     const intensityLabel = document.createElement('label');
     intensityLabel.textContent='Intensity:';
@@ -191,6 +218,24 @@ function refreshPointControls() {
     pointControls.appendChild(div);
   });
 }
+
+function rgbToHex(rgb) {
+    // This function converts an rgb(a, b, c) string to a hex code.
+    // It's a simplified version and might not handle all edge cases perfectly.
+    const parts = rgb.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+    if (!parts) return '#000000'; // Return black for invalid format
+
+    function componentToHex(c) {
+        const hex = parseInt(c).toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+    }
+
+    const r = componentToHex(parts[1]);
+    const g = componentToHex(parts[2]);
+    const b = componentToHex(parts[3]);
+    return `#${r}${g}${b}`;
+}
+
 
 function refreshGrid(){
   grid.innerHTML='';
